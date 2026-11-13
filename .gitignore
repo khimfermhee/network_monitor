@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+out.txt
+err.txt
+data.json
+config.json
