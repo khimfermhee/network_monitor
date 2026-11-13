@@ -17,6 +17,7 @@ th{color:var(--mut);font-weight:500;font-size:12px}tr:last-child td{border-botto
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;background:var(--mut)}
 .on .dot{background:var(--ok)}.blk{color:var(--bad)}
 .acts{display:flex;gap:4px}.acts button{padding:3px 8px;font-size:12px}
+dialog{border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--tx);width:min(420px,90vw)}dialog::backdrop{background:#0008}
 h2{font-size:14px;margin:0 0 6px}#msg{min-height:20px;margin-bottom:8px}.err{color:var(--bad)}
 </style></head><body><main>
 <header><div><h1>LAN Control</h1><div class="mut" id="meta">Loading…</div></div>
@@ -27,6 +28,7 @@ h2{font-size:14px;margin:0 0 6px}#msg{min-height:20px;margin-bottom:8px}.err{col
 <div class="card"><table><thead><tr><th>Status</th><th>Name</th><th>IP</th><th>MAC</th><th>Hostname</th><th>Actions</th></tr></thead><tbody id="rows"></tbody></table></div>
 <h2>Recent activity</h2><div class="card"><table><tbody id="ev"></tbody></table></div>
 </main>
+<dialog id="dlg"><form method="dialog"><p id="dmsg"></p><input id="dinp" style="width:100%;margin-bottom:12px"><div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" id="dcancel">Cancel</button><button class="p" id="dok">OK</button></div></form></dialog>
 <script>
 const $=id=>document.getElementById(id);
 const tok=$('tok');try{tok.value=localStorage.getItem('tok')||''}catch(e){}
@@ -60,22 +62,35 @@ function render(){
    ${!d.is_self?`<button data-a="power" data-i="${i}">Power…</button>`:''}</td></tr>`).join('');
   $('ev').innerHTML=data.events.slice(0,15).map(e=>`<tr><td class="mut">${new Date(e.t*1000).toLocaleString()}</td><td>${esc(e.name||e.ip)}</td><td>${e.ip}</td><td>${e.what}</td></tr>`).join('')||'<tr><td class="mut">No changes yet</td></tr>';
 }
-$('rows').onclick=e=>{
+const dlg=$('dlg');dlg.querySelector('form').onsubmit=ev=>{ev.preventDefault();$('dok').click()};
+// in-page replacement for prompt()/confirm(): embedded browsers often block the native ones
+function ask(msg,def,withInput=true){
+  return new Promise(res=>{
+    $('dmsg').textContent=msg;const i=$('dinp');i.style.display=withInput?'':'none';i.value=def||'';
+    const done=v=>{dlg.close();res(v)};
+    $('dok').onclick=ev=>{ev.preventDefault();done(withInput?i.value:true)};
+    $('dcancel').onclick=ev=>{ev.preventDefault();done(null)};
+    dlg.oncancel=ev=>{ev.preventDefault();done(null)};
+    dlg.showModal();if(withInput){i.focus();i.select()}
+  });
+}
+const yes=m=>ask(m,'',false);
+$('rows').onclick=async e=>{
   const b=e.target.closest('button');if(!b)return;
-  const d=data.scan.devices[b.dataset.i],k=d.mac||d.ip;
+  const d=data.scan.devices[b.dataset.i],k=d.mac||d.ip,nm=d.label||d.hostname||d.ip;
   switch(b.dataset.a){
-   case 'label':{const v=prompt('Name for this device',d.label||d.hostname);if(v!==null)post('/api/label',{key:k,label:v});break}
+   case 'label':{const v=await ask('Name for this device',d.label||d.hostname);if(v!==null)post('/api/label',{key:k,label:v});break}
    case 'wake':post('/api/wake',{mac:d.mac},'Wake packet sent');break;
-   case 'block':if(confirm(`Block ${d.label||d.ip} at the router?`))post('/api/block',{mac:d.mac},'Blocked');break;
+   case 'block':if(await yes(`Block ${nm} at the router?`))post('/api/block',{mac:d.mac},'Blocked');break;
    case 'unblock':post('/api/unblock',{mac:d.mac},'Unblocked');break;
-   case 'limit':{const v=prompt(`Max speed for ${d.label||d.ip} in kbps (e.g. 5000 = 5 Mbit/s). 0 removes the limit.`,d.limit||5000);
+   case 'limit':{const v=await ask(`Max speed for ${nm} in kbps (5000 = 5 Mbit/s). 0 removes the limit.`,d.limit||5000);
      if(v!==null&&/^\d+$/.test(v.trim()))post('/api/limit',{mac:d.mac,ip:d.ip,kbps:+v},+v?'Limit applied':'Limit removed');break}
-   case 'power':{const a=prompt('Action for '+d.ip+': shutdown, restart or abort (30s delay)','shutdown');
-     if(a&&confirm(`${a} ${d.ip}?`))post('/api/power',{host:d.ip,action:a},'Command sent');break}
+   case 'power':{const a=(await ask(`Action for ${d.ip}: shutdown, restart or abort (30s delay)`,'shutdown')||'').trim();
+     if(a&&await yes(`${a} ${d.ip}?`))post('/api/power',{host:d.ip,action:a},'Command sent');break}
   }
 };
-$('net').onclick=()=>{
-  const v=prompt('Network to scan, e.g. 192.168.34.0/24 (leave empty to auto-detect)',data.network_override||(data.scan&&data.scan.network)||'');
+$('net').onclick=async()=>{
+  const v=await ask('Network to scan, e.g. 192.168.34.0/24 (leave empty to auto-detect)',data.network_override||(data.scan&&data.scan.network)||'');
   if(v!==null)post('/api/network',{network:v},'Scanning '+(v.trim()||'auto-detected network'));
 };
 $('scan').onclick=()=>post('/api/scan',{},'Scan started');
