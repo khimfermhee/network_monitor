@@ -21,6 +21,7 @@ h2{font-size:14px;margin:0 0 6px}#msg{min-height:20px;margin-bottom:8px}.err{col
 </style></head><body><main>
 <header><div><h1>LAN Control</h1><div class="mut" id="meta">Loading…</div></div>
 <div class="bar"><input id="tok" type="password" placeholder="Control token (from console)" size="24">
+<button id="net" title="Change the network to scan">Network: …</button>
 <button class="p" id="scan">Scan now</button></div></header>
 <div id="msg"></div>
 <div class="card"><table><thead><tr><th>Status</th><th>Name</th><th>IP</th><th>MAC</th><th>Hostname</th><th>Actions</th></tr></thead><tbody id="rows"></tbody></table></div>
@@ -43,6 +44,8 @@ async function refresh(){
 }
 function render(){
   const s=data.scan;
+  $('net').textContent='Network: '+(data.network_override||(s&&s.network)||'auto')+(data.network_override?'':' (auto)')+' ✎';
+  $('net').disabled=false;
   if(!s){$('meta').textContent=data.scanning?'Scanning…':'No scan yet';return}
   const on=s.devices.filter(d=>d.online).length;
   $('meta').textContent=`${s.network} · ${on} online / ${s.devices.length} seen · router backend: ${data.router} · ${new Date(s.scanned_at*1000).toLocaleTimeString()}${data.scanning?' · scanning…':''}`;
@@ -70,6 +73,10 @@ $('rows').onclick=e=>{
    case 'power':{const a=prompt('Action for '+d.ip+': shutdown, restart or abort (30s delay)','shutdown');
      if(a&&confirm(`${a} ${d.ip}?`))post('/api/power',{host:d.ip,action:a},'Command sent');break}
   }
+};
+$('net').onclick=()=>{
+  const v=prompt('Network to scan, e.g. 192.168.34.0/24 (leave empty to auto-detect)',data.network_override||(data.scan&&data.scan.network)||'');
+  if(v!==null)post('/api/network',{network:v},'Scanning '+(v.trim()||'auto-detected network'));
 };
 $('scan').onclick=()=>post('/api/scan',{},'Scan started');
 refresh();setInterval(refresh,5000);

@@ -1,5 +1,6 @@
 """LAN monitor/controller. Run: python server.py [--host 127.0.0.1] [--port 8080] [--interval 60]"""
 import argparse
+import ipaddress
 import json
 import secrets
 import threading
@@ -43,7 +44,7 @@ def do_scan():
             return
         state["scanning"] = True
     try:
-        result = scanner.scan()
+        result = scanner.scan(saved.get("network") or None)
         with lock:
             prev = {key_of(d): d for d in (state["scan"] or {}).get("devices", [])}
             for d in result["devices"]:
@@ -87,7 +88,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/state":
             with lock:
-                self._send(200, {**state, "router": router.name})
+                self._send(200, {**state, "router": router.name, "network_override": saved.get("network", "")})
         elif self.path in ("/", "/index.html"):
             self._send(200, (ROOT / "index.html").read_bytes(), "text/html; charset=utf-8")
         else:
@@ -110,6 +111,23 @@ class Handler(BaseHTTPRequestHandler):
     def route(self, b):
         p = self.path
         if p == "/api/scan":
+            threading.Thread(target=do_scan, daemon=True).start()
+        elif p == "/api/network":
+            raw = str(b.get("network", "")).strip()
+            if raw:  # empty = auto-detect
+                try:
+                    net = ipaddress.ip_network(raw, strict=False)
+                except ValueError:
+                    raise ValueError("Not a valid network, use a form like 192.168.34.0/24")
+                if net.version != 4 or not net.is_private:
+                    raise ValueError("Only private IPv4 networks can be scanned")
+                if net.num_addresses > 1024:
+                    raise ValueError("Network too large (use /22 or smaller)")
+                raw = str(net)
+            with lock:
+                saved["network"] = raw
+                state["scan"] = None  # don't log every device as 'joined' on a new network
+                persist()
             threading.Thread(target=do_scan, daemon=True).start()
         elif p == "/api/label":
             with lock:
